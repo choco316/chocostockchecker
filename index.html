@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>US Market History Viewer</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1020;--panel:#121a2b;--panel2:#182338;--line:#29354b;--text:#e9eef8;--muted:#9eabc2;--green:#42d6a4;--red:#ff6e7d;--blue:#83b7ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{padding:22px 24px;border-bottom:1px solid var(--line);background:#0d1425;position:sticky;top:0;z-index:2}
+h1{font-size:21px;margin:0 0 4px}header p{margin:0;color:var(--muted)}
+main{padding:20px 24px;max-width:1600px;margin:auto}.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+.controls{display:grid;grid-template-columns:repeat(6,minmax(130px,1fr));gap:12px;align-items:end}
+label{display:block;color:var(--muted);font-size:12px;margin-bottom:5px}
+input,select,button{font:inherit;color:var(--text);background:#0d1526;border:1px solid var(--line);border-radius:8px;padding:10px;width:100%}
+button{cursor:pointer;background:#213553;border-color:#345174;font-weight:600}button:hover{background:#29466d}button:disabled{opacity:.45;cursor:wait}.primary{background:#245e52;border-color:#287966}.danger{background:#482632;border-color:#754050}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.actions button{width:auto}
+.status{color:var(--muted);font-size:12px;margin-top:10px;min-height:18px}.stats{display:flex;gap:12px;flex-wrap:wrap;margin:10px 0}.stat{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--muted)}.stat strong{color:var(--text);display:block;font-size:17px}
+.tablewrap{overflow:auto;border:1px solid var(--line);border-radius:10px}table{width:100%;border-collapse:collapse;min-width:1000px}th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--muted);font-size:12px;background:#111a2c;position:sticky;top:0}tbody tr:hover{background:#172238}.ticker{font-weight:700}.sub{font-size:11px;color:var(--muted);white-space:normal;max-width:230px}.chart{width:190px;height:48px;display:block}.pos{color:var(--green)}.neg{color:var(--red)}.pill{border:1px solid var(--line);padding:3px 7px;border-radius:999px;color:var(--muted);font-size:11px}
+.progress{height:7px;background:#0a1020;border-radius:9px;overflow:hidden;margin-top:8px}.progress>div{height:100%;background:var(--green);width:0}
+.small{font-size:12px;color:var(--muted)}.notice{border-left:3px solid #d5a44a;padding:9px 12px;background:#282317;color:#e8d9b4;border-radius:4px;margin-bottom:14px}
+@media(max-width:1000px){.controls{grid-template-columns:repeat(2,minmax(0,1fr))}main{padding:12px}header{padding:16px}}
+</style>
+</head>
+<body>
+<header><h1>US Market History Viewer</h1><p>Visualizador personal de históricos de acciones y ETF estadounidenses · beta</p></header>
+<main>
+<div class="notice"><strong>Antes de empezar:</strong> esta versión usa Yahoo Finance mediante un proxy de Cloudflare Worker. Es una fuente no oficial, puede limitar peticiones y no garantiza cobertura completa. Los datos se guardan en este navegador (IndexedDB), no en una cuenta en la nube. Exporta copias de seguridad con frecuencia.</div>
+<section class="panel">
+<div class="controls">
+<div><label>Proxy Worker URL</label><input id="worker" placeholder="https://tu-worker.tu-cuenta.workers.dev"></div>
+<div><label>Tipo</label><select id="type"><option value="ALL">Acciones + ETF</option><option value="Stock">Acciones</option><option value="ETF">ETF</option></select></div>
+<div><label>Mercado</label><select id="exchange"><option value="ALL">Todos</option><option value="NASDAQ">Nasdaq</option><option value="NYSE">NYSE</option><option value="NYSE American">NYSE American</option><option value="NYSE Arca">NYSE Arca</option><option value="Other">Otros mercados</option></select></div>
+<div><label>Buscar nombre o ticker</label><input id="search" placeholder="Ej. AAPL, Nvidia"></div>
+<div><label>Gráfico</label><select id="interval"><option value="1d">Diario</option><option value="1mo">Mensual</option></select></div>
+<div><label>Ventana</label><select id="window"><option value="all">All (todo disponible)</option><option value="60">Últimas 60 sesiones</option><option value="36">Últimos 36 meses</option></select></div>
+</div>
+<div class="actions">
+<button class="primary" id="loadCatalog">Actualizar catálogo US</button>
+<button id="selectPage">Seleccionar primeros 100 visibles</button>
+<button class="primary" id="download">Descargar históricos seleccionados</button>
+<button id="export">Exportar copia JSON</button>
+<button id="importBtn">Importar copia JSON</button><input id="importFile" type="file" accept=".json,application/json" hidden>
+<button class="danger" id="clear">Borrar datos locales</button>
+</div>
+<div class="progress"><div id="bar"></div></div><div class="status" id="status">Configura la URL del Worker y actualiza el catálogo. La URL queda guardada en este navegador.</div>
+<div class="stats"><div class="stat"><strong id="nInstruments">0</strong>Instrumentos en catálogo local</div><div class="stat"><strong id="nHistories">0</strong>Instrumentos con histórico</div><div class="stat"><strong id="nBars">0</strong>Velas diarias guardadas</div><div class="stat"><strong id="nSelected">0</strong>Seleccionados</div></div>
+<p class="small">La carga de históricos procesa lotes de hasta 100 instrumentos de forma secuencial para reducir errores por límites de consulta. El primer registro descargado no necesariamente coincide con la fecha real de salida a bolsa.</p>
+</section>
+<section class="panel">
+<div class="actions" style="margin-top:0;margin-bottom:12px"><button id="prev">← Anterior</button><button id="next">Siguiente →</button><span class="pill" id="pageLabel">Página 1</span><span class="small">Marca instrumentos para descargar su histórico.</span></div>
+<div class="tablewrap"><table><thead><tr><th>Sel.</th><th>Instrumento</th><th>Mercado</th><th>Último cierre</th><th>Volumen</th><th>Primer dato guardado</th><th>Histórico · <span id="chartLabel">diario</span></th><th>Estado</th></tr></thead><tbody id="rows"><tr><td colspan="8">No hay catálogo todavía.</td></tr></tbody></table></div>
+</section>
+<section class="panel"><strong>Notas de cobertura</strong><p class="small">El catálogo proviene de directorios públicos de símbolos de Nasdaq Trader. Se excluyen pruebas y se priorizan acciones/ETF identificados por el directorio; puede haber valores especiales, símbolos que Yahoo no reconoce y datos incompletos. El volumen y el cierre corresponden a la última sesión guardada hasta que actualices el histórico. Los gráficos mensuales se agregan desde las velas diarias.</p></section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let db, instruments=[], selected=new Set(), page=0, pageSize=100, busy=false;
+const DB_NAME='us-market-history-viewer', DB_VERSION=1;
+function setStatus(s){$('status').textContent=s}
+function workerUrl(){return $('worker').value.trim().replace(/\/+$/,'')}
+function api(path){const w=workerUrl();if(!w)throw new Error('Introduce primero la URL del Cloudflare Worker.');return w+path}
+function openDB(){return new Promise((resolve,reject)=>{const req=indexedDB.open(DB_NAME,DB_VERSION);req.onupgradeneeded=()=>{const d=req.result;if(!d.objectStoreNames.contains('instruments'))d.createObjectStore('instruments',{keyPath:'symbol'});if(!d.objectStoreNames.contains('bars')){const s=d.createObjectStore('bars',{keyPath:['symbol','date']});s.createIndex('symbol','symbol',{unique:false})}if(!d.objectStoreNames.contains('meta'))d.createObjectStore('meta',{keyPath:'key'})};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
+function tx(store,mode='readonly'){return db.transaction(store,mode).objectStore(store)}
+function getAll(store){return new Promise((resolve,reject)=>{const r=tx(store).getAll();r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})}
+function put(store,obj){return new Promise((resolve,reject)=>{const r=tx(store,'readwrite').put(obj);r.onsuccess=()=>resolve();r.onerror=()=>reject(r.error)})}
+function putMany(store,items){return new Promise((resolve,reject)=>{const t=db.transaction(store,'readwrite'),s=t.objectStore(store);for(const x of items)s.put(x);t.oncomplete=resolve;t.onerror=()=>reject(t.error)})}
+function clearStore(store){return new Promise((resolve,reject)=>{const r=tx(store,'readwrite').clear();r.onsuccess=resolve;r.onerror=()=>reject(r.error)})}
+function fmt(n){return n==null||!Number.isFinite(Number(n))?'—':Number(n).toLocaleString('en-US',{maximumFractionDigits:2})}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function monthly(bars){const m=new Map();for(const b of bars){const k=b.date.slice(0,7);if(!m.has(k))m.set(k,{symbol:b.symbol,date:k+'-01',open:b.open,high:b.high,low:b.low,close:b.close,volume:b.volume});else{const x=m.get(k);x.high=Math.max(x.high,b.high);x.low=Math.min(x.low,b.low);x.close=b.close;x.volume=(x.volume||0)+(b.volume||0)}}return [...m.values()]}
+function compressBars(bars,max=180){if(bars.length<=max)return bars;const out=[];for(let i=0;i<max;i++){const start=Math.floor(i*bars.length/max),end=Math.floor((i+1)*bars.length/max),chunk=bars.slice(start,Math.max(start+1,end));if(!chunk.length)continue;out.push({date:chunk[0].date,open:chunk[0].open,high:Math.max(...chunk.map(x=>x.high)),low:Math.min(...chunk.map(x=>x.low)),close:chunk[chunk.length-1].close,volume:chunk.reduce((s,x)=>s+(x.volume||0),0)})}return out}
+function chartSVG(bars){if(!bars.length)return '<span class="small">Sin datos</span>';bars=compressBars(bars,180);const W=190,H=48,p=3,step=(W-2*p)/bars.length,lo=Math.min(...bars.map(x=>x.low)),hi=Math.max(...bars.map(x=>x.high)),range=hi-lo||1;let s=`<svg class="chart" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;bars.forEach((b,i)=>{const x=p+i*step+step/2,y=v=>H-p-(v-lo)/range*(H-2*p),up=b.close>=b.open,c=up?'#42d6a4':'#ff6e7d',bw=Math.max(1,Math.min(4,step*.58));s+=`<line x1="${x}" y1="${y(b.high)}" x2="${x}" y2="${y(b.low)}" stroke="${c}" stroke-width="1"/>`;let top=Math.min(y(b.open),y(b.close)),bh=Math.max(1,Math.abs(y(b.open)-y(b.close)));s+=`<rect x="${x-bw/2}" y="${top}" width="${bw}" height="${bh}" fill="${c}"/>`});return s+'</svg>'}
+async function barsFor(symbol){return new Promise((resolve,reject)=>{const r=tx('bars').index('symbol').getAll(symbol);r.onsuccess=()=>resolve(r.result.sort((a,b)=>a.date.localeCompare(b.date)));r.onerror=()=>reject(r.error)})}
+function filtered(){const q=$('search').value.trim().toLowerCase(),t=$('type').value,e=$('exchange').value;return instruments.filter(x=>(t==='ALL'||x.type===t)&&(e==='ALL'||x.exchange===e||e==='Other'&&!['NASDAQ','NYSE','NYSE American','NYSE Arca'].includes(x.exchange))&&(!q||x.symbol.toLowerCase().includes(q)||x.name.toLowerCase().includes(q)))}
+async function render(){const list=filtered(),maxPage=Math.max(0,Math.ceil(list.length/pageSize)-1);page=Math.min(page,maxPage);const shown=list.slice(page*pageSize,(page+1)*pageSize);$('pageLabel').textContent=`Página ${page+1} de ${Math.max(1,maxPage+1)} · ${list.length} resultados`;$('chartLabel').textContent=$('interval').value==='1d'?'diario':'mensual';let html='';for(const x of shown){const bars=await barsFor(x.symbol),latest=bars[bars.length-1],shownBars=$('interval').value==='1mo'?monthly(bars):bars;let chart=shownBars;if($('window').value==='60'&&$('interval').value==='1d')chart=shownBars.slice(-60);else if($('window').value==='36'&&$('interval').value==='1mo')chart=shownBars.slice(-36);else if($('window').value==='36'&&$('interval').value==='1d')chart=shownBars.slice(-756);else if($('window').value==='60'&&$('interval').value==='1mo')chart=shownBars.slice(-60);html+=`<tr><td><input type="checkbox" data-symbol="${esc(x.symbol)}" ${selected.has(x.symbol)?'checked':''} style="width:auto"></td><td><div class="ticker">${esc(x.symbol)}</div><div class="sub">${esc(x.name)}</div></td><td>${esc(x.exchange)}</td><td>${latest?fmt(latest.close):'—'}</td><td>${latest?fmt(latest.volume):'—'}</td><td>${bars.length?esc(bars[0].date):'—'}</td><td>${chartSVG(chart)}</td><td><span class="pill">${bars.length?'Histórico guardado':'Pendiente'}</span></td></tr>`} $('rows').innerHTML=html||'<tr><td colspan="8">No hay resultados.</td></tr>';document.querySelectorAll('[data-symbol]').forEach(c=>c.addEventListener('change',()=>{if(c.checked)selected.add(c.dataset.symbol);else selected.delete(c.dataset.symbol);stats()}));stats()}
+async function stats(){const all=await getAll('bars'),syms=new Set(all.map(b=>b.symbol));$('nInstruments').textContent=instruments.length.toLocaleString();$('nHistories').textContent=syms.size.toLocaleString();$('nBars').textContent=all.length.toLocaleString();$('nSelected').textContent=selected.size.toLocaleString()}
+async function loadLocal(){instruments=await getAll('instruments');instruments.sort((a,b)=>a.symbol.localeCompare(b.symbol));const meta=await new Promise(resolve=>{const r=tx('meta').get('worker');r.onsuccess=()=>resolve(r.result);r.onerror=()=>resolve(null)});if(meta&&!$('worker').value)$('worker').value=meta.value;await render()}
+async function requestCatalog(){if(busy)return;busy=true;toggleBusy();try{await put('meta',{key:'worker',value:workerUrl()});setStatus('Descargando directorios de símbolos…');const r=await fetch(api('/catalog'));if(!r.ok)throw new Error(await r.text());const data=await r.json();await putMany('instruments',data.instruments);instruments=data.instruments.sort((a,b)=>a.symbol.localeCompare(b.symbol));page=0;setStatus(`Catálogo actualizado: ${instruments.length.toLocaleString()} instrumentos. Los históricos se descargan por separado.`);await render()}catch(e){setStatus('Error: '+e.message)}finally{busy=false;toggleBusy()}}
+function toggleBusy(){['loadCatalog','download','export','importBtn','clear'].forEach(id=>$(id).disabled=busy)}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function downloadSelected(){if(busy)return;if(!selected.size){setStatus('Selecciona símbolos con las casillas de la tabla.');return}busy=true;toggleBusy();const list=[...selected].slice(0,100);let ok=0,fail=0;try{await put('meta',{key:'worker',value:workerUrl()});for(let i=0;i<list.length;i++){const symbol=list[i];setStatus(`Descargando histórico ${i+1}/${list.length}: ${symbol}…`);$('bar').style.width=`${Math.round(i/list.length*100)}%`;try{const r=await fetch(api('/history?symbol='+encodeURIComponent(symbol)));if(!r.ok)throw new Error((await r.text()).slice(0,180));const data=await r.json();if(!data.bars?.length)throw new Error('No se recibieron velas');await putMany('bars',data.bars);const ins=instruments.find(x=>x.symbol===symbol);if(ins){ins.status='ok';ins.updatedAt=new Date().toISOString();await put('instruments',ins)}ok++}catch(e){fail++;console.warn(symbol,e)}await sleep(180)}$('bar').style.width='100%';setStatus(`Proceso terminado. Correctos: ${ok}; errores/sin datos: ${fail}. Puedes reintentar los fallidos.`);await loadLocal()}finally{busy=false;toggleBusy()}}
+async function exportData(){const [ins,bars]=await Promise.all([getAll('instruments'),getAll('bars')]);const blob=new Blob([JSON.stringify({format:'us-market-history-viewer-v1',exportedAt:new Date().toISOString(),instruments:ins,bars},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='us-market-history-backup.json';a.click();URL.revokeObjectURL(a.href);setStatus(`Copia exportada: ${ins.length} instrumentos y ${bars.length} velas.`)}
+async function importData(file){try{const d=JSON.parse(await file.text());if(!Array.isArray(d.instruments)||!Array.isArray(d.bars))throw new Error('Formato de copia no válido');await putMany('instruments',d.instruments);for(let i=0;i<d.bars.length;i+=3000)await putMany('bars',d.bars.slice(i,i+3000));await loadLocal();setStatus(`Importación completada: ${d.instruments.length} instrumentos, ${d.bars.length} velas.`)}catch(e){setStatus('Error al importar: '+e.message)}}
+$('loadCatalog').onclick=requestCatalog;$('download').onclick=downloadSelected;$('export').onclick=exportData;$('importBtn').onclick=()=>$('importFile').click();$('importFile').onchange=e=>{if(e.target.files[0])importData(e.target.files[0])};$('selectPage').onclick=()=>{const list=filtered().slice(page*pageSize,(page+1)*pageSize);list.forEach(x=>selected.add(x.symbol));render()};$('prev').onclick=()=>{page=Math.max(0,page-1);render()};$('next').onclick=()=>{page++;render()};['type','exchange','search','interval','window'].forEach(id=>$(id).addEventListener(id==='search'?'input':'change',()=>{page=0;render()}));$('clear').onclick=async()=>{if(confirm('¿Borrar el catálogo y todos los históricos guardados en este navegador? Esta acción no se puede deshacer.')){await clearStore('instruments');await clearStore('bars');selected.clear();await loadLocal();setStatus('Datos locales borrados.')}}; 
+(async()=>{try{db=await openDB();await loadLocal()}catch(e){setStatus('No se pudo abrir IndexedDB: '+e.message)}})();
+</script>
+</body></html>
